@@ -62,6 +62,8 @@ final class DefaultChannelHandlerContext extends DefaultAttributeMap implements 
     private ByteBuf outByteBuf;
 
     private int flags;
+    private boolean needsFlush;
+    private boolean needsFireInboundBufferUpdated;
 
     // When the two handlers run in a different thread and they are next to each other,
     // each other's buffers can be accessed at the same time resulting in a race condition.
@@ -245,34 +247,9 @@ final class DefaultChannelHandlerContext extends DefaultAttributeMap implements 
                     inboundBufferUpdated = true;
                 }
             }
-            if (flush) {
-                EventExecutor executor = executor();
-                Thread currentThread = Thread.currentThread();
-                if (executor.inEventLoop(currentThread)) {
-                    invokePrevFlush(newPromise(), currentThread, findContextOutboundInclusive(forwardPrev));
-                } else {
-                    executor.execute(new Runnable() {
-                        @Override
-                        public void run() {
-                            invokePrevFlush(newPromise(), Thread.currentThread(),
-                                    findContextOutboundInclusive(forwardPrev));
-                        }
-                    });
-                }
-            }
-            if (inboundBufferUpdated) {
-                EventExecutor executor = executor();
-                if (executor.inEventLoop()) {
-                    fireInboundBufferUpdated0(findContextInboundInclusive(forwardNext));
-                } else {
-                    executor.execute(new Runnable() {
-                        @Override
-                        public void run() {
-                            fireInboundBufferUpdated0(findContextInboundInclusive(forwardNext));
-                        }
-                    });
-                }
-            }
+            needsFlush = flush;
+            needsFireInboundBufferUpdated = inboundBufferUpdated;
+            System.out.println("Flush " + needsFlush + " Inbound " + needsFireInboundBufferUpdated);
         } finally {
             flags |= FLAG_REMOVED;
 
@@ -283,18 +260,14 @@ final class DefaultChannelHandlerContext extends DefaultAttributeMap implements 
         }
     }
 
-    private static DefaultChannelHandlerContext findContextOutboundInclusive(DefaultChannelHandlerContext ctx) {
-        if (ctx.handler() instanceof ChannelOperationHandler) {
-            return ctx;
+    void notifyAboutForwardContent(final DefaultChannelHandlerContext forwardPrev,
+                            final DefaultChannelHandlerContext forwardNext) {
+        if (needsFlush) {
+            forwardPrev.next.flush();
         }
-        return ctx.findContextOutbound();
-    }
-
-    private static DefaultChannelHandlerContext findContextInboundInclusive(DefaultChannelHandlerContext ctx) {
-        if (ctx.handler() instanceof ChannelStateHandler) {
-            return ctx;
+        if (needsFireInboundBufferUpdated) {
+            forwardNext.prev.fireInboundBufferUpdated();
         }
-        return ctx.findContextInbound();
     }
 
     void clearBuffer() {

@@ -372,7 +372,7 @@ final class DefaultChannelPipeline implements ChannelPipeline {
         next.prev = prev;
         name2ctx.remove(ctx.name());
 
-        callAfterRemove(ctx, prev, next);
+        callAfterRemove(ctx, prev, next, true);
     }
 
     @Override
@@ -468,9 +468,10 @@ final class DefaultChannelPipeline implements ChannelPipeline {
         }
         name2ctx.put(newName, newCtx);
 
-        // remove old and add new
-        callAfterRemove(ctx, newCtx, newCtx);
-        callAfterAdd(newCtx);
+        // remove old and add new. Notify about forwarded content will be done after the replacements
+        // handlerAdded(...) method was executed
+        callAfterRemove(ctx, newCtx, newCtx, false);
+        callAfterReplace(newCtx, ctx);
     }
 
     private static void callBeforeAdd(ChannelHandlerContext ctx) {
@@ -484,6 +485,22 @@ final class DefaultChannelPipeline implements ChannelPipeline {
             }
             h.added = true;
         }
+    }
+
+    private void callAfterReplace(final DefaultChannelHandlerContext ctx,
+                                   final DefaultChannelHandlerContext replaced) {
+        if (ctx.channel().isRegistered() && !ctx.executor().inEventLoop()) {
+            ctx.executor().execute(new Runnable() {
+                @Override
+                public void run() {
+                    callAfterAdd0(ctx);
+                    replaced.notifyAboutForwardContent(ctx, ctx);
+                }
+            });
+            return;
+        }
+        callAfterAdd0(ctx);
+        replaced.notifyAboutForwardContent(ctx, ctx);
     }
 
     private void callAfterAdd(final ChannelHandlerContext ctx) {
@@ -527,22 +544,22 @@ final class DefaultChannelPipeline implements ChannelPipeline {
 
     private void callAfterRemove(
             final DefaultChannelHandlerContext ctx, final DefaultChannelHandlerContext ctxPrev,
-            final DefaultChannelHandlerContext ctxNext) {
+            final DefaultChannelHandlerContext ctxNext, final boolean notify) {
         if (ctx.channel().isRegistered() && !ctx.executor().inEventLoop()) {
             ctx.executor().execute(new Runnable() {
                 @Override
                 public void run() {
-                    callAfterRemove0(ctx, ctxPrev, ctxNext);
+                    callAfterRemove0(ctx, ctxPrev, ctxNext, notify);
                 }
             });
             return;
         }
-        callAfterRemove0(ctx, ctxPrev, ctxNext);
+        callAfterRemove0(ctx, ctxPrev, ctxNext, notify);
     }
 
     private void callAfterRemove0(
             final DefaultChannelHandlerContext ctx, DefaultChannelHandlerContext ctxPrev,
-            DefaultChannelHandlerContext ctxNext) {
+            DefaultChannelHandlerContext ctxNext, boolean notify) {
 
         final ChannelHandler handler = ctx.handler();
 
@@ -556,6 +573,9 @@ final class DefaultChannelPipeline implements ChannelPipeline {
         }
 
         ctx.forwardBufferContentAndRemove(ctxPrev, ctxNext);
+        if (notify) {
+            ctx.notifyAboutForwardContent(ctxPrev, ctxNext);
+        }
     }
 
     /**
