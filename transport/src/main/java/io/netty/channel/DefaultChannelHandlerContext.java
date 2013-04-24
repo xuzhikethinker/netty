@@ -249,7 +249,6 @@ final class DefaultChannelHandlerContext extends DefaultAttributeMap implements 
             }
             needsFlush = flush;
             needsFireInboundBufferUpdated = inboundBufferUpdated;
-            System.out.println("Flush " + needsFlush + " Inbound " + needsFireInboundBufferUpdated);
         } finally {
             flags |= FLAG_REMOVED;
 
